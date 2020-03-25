@@ -1,13 +1,15 @@
 {% extends '_base.py.j2' %}
 
 {% block content %}
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple
 
 from google.api_core import grpc_helpers   # type: ignore
 {%- if service.has_lro %}
 from google.api_core import operations_v1  # type: ignore
 {%- endif %}
 from google.auth import credentials        # type: ignore
+from google.auth.transport.grpc import SslCredentials  # type: ignore
+
 
 import grpc  # type: ignore
 
@@ -35,7 +37,9 @@ class {{ service.name }}GrpcTransport({{ service.name }}Transport):
     def __init__(self, *,
             host: str{% if service.host %} = '{{ service.host }}'{% endif %},
             credentials: credentials.Credentials = None,
-            channel: grpc.Channel = None) -> None:
+            channel: grpc.Channel = None,
+            api_mtls_endpoint: str = None,
+            client_cert_callback: Callable[[], Tuple[bytes, bytes]] = None) -> None:
         """Instantiate the transport.
 
         Args:
@@ -50,10 +54,36 @@ class {{ service.name }}GrpcTransport({{ service.name }}Transport):
             channel (Optional[grpc.Channel]): A ``Channel`` instance through
                 which to make calls.
         """
-        # Sanity check: Ensure that channel and credentials are not both
-        # provided.
-        if channel:
-            credentials = False
+        if api_mtls_endpoint or client_cert_callback:
+            # override the endpoint
+            if api_mtls_endpoint:
+                host = api_mtls_endpoint
+
+            # create SSL credentials
+            if client_cert_callback:
+                cert, key = client_cert_callback()
+                ssl_credentials = grpc.ssl_channel_credentials(
+                    certificate_chain=cert, private_key=key
+                )
+            else:
+                # try SSL ADC. May raise exceptions.
+                ssl_credentials = SslCredentials().ssl_credentials
+
+            # create a new channel. The provided one is ignored.
+            self._grpc_channel = grpc_helpers.create_channel(
+                host,
+                credentials=credentials,
+                ssl_credentials=ssl_credentials,
+                scopes=self.AUTH_SCOPES,
+            )
+        else:
+            if channel:
+                # Sanity check: Ensure that channel and credentials are not both
+                # provided.
+                credentials = False
+
+                # If a channel was explicitly provided, set it.
+                self._grpc_channel = channel
 
         # Run the base constructor.
         super().__init__(host=host, credentials=credentials)

@@ -2,7 +2,7 @@
 
 {% block content %}
 from collections import OrderedDict
-from typing import Dict, {% if service.any_server_streaming %}Iterable, {% endif %}{% if service.any_client_streaming %}Iterator, {% endif %}Sequence, Tuple, Type, Union
+from typing import Callable, Dict, {% if service.any_server_streaming %}Iterable, {% endif %}{% if service.any_client_streaming %}Iterator, {% endif %}Sequence, Tuple, Type, Union
 import pkg_resources
 
 import google.api_core.client_options as ClientOptions # type: ignore
@@ -93,7 +93,8 @@ class {{ service.client_name }}(metaclass={{ service.client_name }}Meta):
             credentials: credentials.Credentials = None,
             transport: Union[str, {{ service.name }}Transport] = None,
             client_options: ClientOptions = DEFAULT_OPTIONS,
-            ) -> None:
+            api_mtls_endpoint: str = None,
+            client_cert_callback: Callable[[], Tuple[bytes, bytes]] = None) -> None:
         """Instantiate the {{ (service.client_name|snake_case).replace('_', ' ') }}.
 
         Args:
@@ -106,9 +107,17 @@ class {{ service.client_name }}(metaclass={{ service.client_name }}Meta):
                 transport to use. If set to None, a transport is chosen
                 automatically.
             client_options (ClientOptions): Custom options for the client.
+            api_mtls_endpoint (str): mTLS endpoint override.
+            client_cert_callback (Callable[[], Tuple[bytes, bytes]]): Callback
+                which returns client side SSL certificate bytes and private key
+                bytes, both in PEM format.
         """
         if isinstance(client_options, dict):
             client_options = ClientOptions.from_dict(client_options)
+
+        if api_mtls_endpoint or client_cert_callback:
+            # A new mTLS transport will be created to replace the given transport.
+            transport = None
 
         # Save or instantiate the transport.
         # Ordinarily, we provide the transport, but allowing a custom transport
@@ -123,6 +132,8 @@ class {{ service.client_name }}(metaclass={{ service.client_name }}Meta):
             self._transport = Transport(
                 credentials=credentials,
                 host=client_options.api_endpoint{% if service.host %} or '{{ service.host }}'{% endif %},
+                api_mtls_endpoint=api_mtls_endpoint,
+                client_cert_callback=client_cert_callback,
             )
 
     {% for method in service.methods.values() -%}
